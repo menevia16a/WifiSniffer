@@ -1,6 +1,6 @@
 # ESP32 Sniffer
 
-An ESP32 Sniffer made with ArduinoPCAP and used in Capibara Zero.
+An ESP32 Sniffer made with ArduinoPCAP and used in VoidCipher (enhanced capibaraZero)
 
 ## How to use it?
 
