@@ -30,129 +30,142 @@
 int sniffed_packet_count = 0;
 static PCAP pcap = PCAP();
 static unsigned long int last_save = millis();
+static QueueHandle_t packetQueue =
+    xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
 
-void cb(void* buf, wifi_promiscuous_pkt_type_t type) {
-    wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
-    wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
+static void packet_processing_task(void* pv) {
+    WifiSniffer* sniffer = static_cast<WifiSniffer*>(pv);
+    wifi_promiscuous_pkt_t* pkt;
 
-    /* MISC PKT have 0 bytes payload and should be ignored */
+    while (true) {
+        // Wait for a packet from the queue
+        if (xQueueReceive(packetQueue, &pkt, portMAX_DELAY)) {
+            wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
+            uint32_t packetLength = ctrl.sig_len;
+
+            // Check for management packet bug
+            if (packetLength > 2500) {
+                free(pkt); // Free the packet memory
+
+                continue;
+            }
+
+            // Process the packet (write to PCAP or handle EAPOL)
+            pcap.newPacketSD(ctrl.timestamp, ctrl.timestamp, packetLength,
+                             pkt->payload);
+            sniffed_packet_count++;
+
+            free(pkt); // Free the packet memory
+        }
+    }
+}
+
+static void cb(void* buf, wifi_promiscuous_pkt_type_t type) {
     if (type == WIFI_PKT_MISC)
+        return; // Ignore misc packets
+
+    // Allocate memory for the packet and copy the data
+    wifi_promiscuous_pkt_t* pkt =
+        (wifi_promiscuous_pkt_t*)malloc(sizeof(wifi_promiscuous_pkt_t));
+
+    if (!pkt) {
+        Serial.println("Failed to allocate memory for packet");
+
         return;
+    }
 
-    /* Packet too long */
-    if (ctrl.sig_len > 2500)
-        return;
+    memcpy(pkt, buf, sizeof(wifi_promiscuous_pkt_t));
 
-    uint32_t packetLength = ctrl.sig_len;
+    // Send the packet to the queue
+    BaseType_t status = xQueueSendFromISR(packetQueue, &pkt, NULL);
 
-    if (type == WIFI_PKT_MGMT)
-        packetLength -= 4; //  fix for known bug in the IDF
-                           //  https://github.com/espressif/esp-idf/issues/886.
-                           //  Thanks to spacehuhn
-
-    uint32_t timestamp = now(); // current timestamp
-    uint32_t microseconds =
-        (unsigned int)(micros() -
-                       millis() * 1000); // micro seconds offset (0 - 999)
-
-    pcap.newPacketSD(timestamp, microseconds, packetLength, pkt->payload);
-    sniffed_packet_count++;
-
-    if (millis() - last_save >= 2000) {
-        pcap.flushFile();
-        last_save = millis();
+    if (status != pdPASS) {
+        Serial.println("Failed to enqueue packet");
+        free(pkt); // Free memory if the queue is full
     }
 }
 
 uint8_t _bssid[6];
 
 static void cb_bssid(void* buf, wifi_promiscuous_pkt_type_t type) {
+    if (type == WIFI_PKT_MISC)
+        return; // Ignore misc packets
+
     wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
     wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
 
-    /* MISC PKT have 0 bytes payload and should be ignored */
-    if (type == WIFI_PKT_MISC)
-        return;
-
-    /* Packet too long */
+    // Packet too long
     if (ctrl.sig_len > 2500)
         return;
 
-    /* Compare addr1/addr2/addr3 and saved BSSID */
+    // Compare addr1, addr2, and addr3 with the saved BSSID
     if (memcmp(&pkt->payload[4], _bssid, 6) != 0 &&
         memcmp(&pkt->payload[10], _bssid, 6) != 0 &&
         memcmp(&pkt->payload[18], _bssid, 6) != 0)
         return;
 
-    uint32_t packetLength = ctrl.sig_len;
-    if (type == WIFI_PKT_MGMT)
-        packetLength -= 4; //  fix for known bug in the IDF
-                           //  https://github.com/espressif/esp-idf/issues/886.
-                           //  Thanks to spacehuhn
+    // Allocate memory for the packet and enqueue it
+    wifi_promiscuous_pkt_t* pkt_copy =
+        (wifi_promiscuous_pkt_t*)malloc(sizeof(wifi_promiscuous_pkt_t));
 
-    uint32_t timestamp = now(); // current timestamp
-    uint32_t microseconds =
-        (unsigned int)(micros() -
-                       millis() * 1000); // micro seconds offset (0 - 999)
+    if (!pkt_copy) {
+        Serial.println("Failed to allocate memory for packet");
 
-    pcap.newPacketSD(timestamp, microseconds, packetLength, pkt->payload);
-    sniffed_packet_count++;
+        return;
+    }
 
-    if (millis() - last_save >= 2000) {
-        pcap.flushFile();
-        last_save = millis();
+    memcpy(pkt_copy, buf, sizeof(wifi_promiscuous_pkt_t));
+
+    BaseType_t status = xQueueSendFromISR(packetQueue, &pkt_copy, NULL);
+
+    if (status != pdPASS) {
+        Serial.println("Failed to enqueue packet");
+        free(pkt_copy); // Free memory if the queue is full
     }
 }
 
 static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
+    if (type == WIFI_PKT_MISC)
+        return; // Ignore misc packets
+
     wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
     wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
 
-    /* MISC PKT have 0 bytes payload and should be ignored */
-    if (type == WIFI_PKT_MISC)
-        return;
-
-    /* Packet too long */
+    // Packet too long
     if (ctrl.sig_len > 2500)
         return;
 
+    // Only handle management or data packets
     if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA)
         return;
-    if (pkt->payload[0] != 0x88 || pkt->payload[1] != 0x8E)
-        return; // Not EAPOL
 
-    /* Compare addr1/addr2/addr3 and saved BSSID */
+    // EAPOL frames start with 0x88 0x8E in the frame payload
+    if (pkt->payload[0] != 0x88 || pkt->payload[1] != 0x8E)
+        return;
+
+    // Compare addr1, addr2, and addr3 with the saved BSSID
     if (memcmp(&pkt->payload[4], _bssid, 6) != 0 &&
         memcmp(&pkt->payload[10], _bssid, 6) != 0 &&
         memcmp(&pkt->payload[18], _bssid, 6) != 0)
         return;
 
-    uint32_t packetLength = ctrl.sig_len;
-    if (type == WIFI_PKT_MGMT)
-        packetLength -= 4; //  fix for known bug in the IDF
-                           //  https://github.com/espressif/esp-idf/issues/886.
-                           //  Thanks to spacehuhn
+    // Allocate memory for the packet and enqueue it
+    wifi_promiscuous_pkt_t* pkt_copy =
+        (wifi_promiscuous_pkt_t*)malloc(sizeof(wifi_promiscuous_pkt_t));
 
-    if (type == WIFI_PKT_MGMT || type == WIFI_PKT_DATA) {
-        // EAPOL frames start with 0x88 0x8E in the frame payload
-        if (pkt->payload[0] == 0x88 && pkt->payload[1] == 0x8E) {
-            // Process EAPOL frame
-            Serial.println("EAPOL frame detected!");
-            uint32_t timestamp = now(); // current timestamp
-            uint32_t microseconds =
-                (unsigned int)(micros() -
-                               millis() *
-                                   1000); // micro seconds offset (0 - 999)
+    if (!pkt_copy) {
+        Serial.println("Failed to allocate memory for packet");
 
-            pcap.newPacketSD(timestamp, microseconds, packetLength,
-                             pkt->payload);
-            sniffed_packet_count++;
+        return;
+    }
 
-            if (millis() - last_save >= 2000) {
-                pcap.flushFile();
-                last_save = millis();
-            }
-        }
+    memcpy(pkt_copy, buf, sizeof(wifi_promiscuous_pkt_t));
+
+    BaseType_t status = xQueueSendFromISR(packetQueue, &pkt_copy, NULL);
+
+    if (status != pdPASS) {
+        Serial.println("Failed to enqueue packet");
+        free(pkt_copy); // Free memory if the queue is full
     }
 }
 
@@ -162,8 +175,20 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
     esp_wifi_set_promiscuous_rx_cb(cb);
 
     pcap.filename = filename;
-
     pcap.openFile(SD);
+
+    // Create a queue for packet processing
+    packetQueue = xQueueCreate(10, sizeof(wifi_promiscuous_pkt_t*));
+
+    if (packetQueue == NULL) {
+        Serial.println("Failed to create packet queue!");
+
+        return;
+    }
+
+    // Start the packet processing task
+    xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
+                5, NULL);
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
@@ -173,8 +198,18 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
     esp_wifi_set_promiscuous_rx_cb(cb_bssid);
 
     pcap.filename = filename;
-
     pcap.openFile(SD);
+
+    packetQueue = xQueueCreate(10, sizeof(wifi_promiscuous_pkt_t*));
+
+    if (packetQueue == NULL) {
+        Serial.println("Failed to create packet queue!");
+
+        return;
+    }
+
+    xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
+                5, NULL);
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
@@ -190,18 +225,33 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
         esp_wifi_set_promiscuous_rx_cb(cb_handshake_capture);
 
     pcap.filename = filename;
-
     pcap.openFile(SD);
+
+    packetQueue = xQueueCreate(10, sizeof(wifi_promiscuous_pkt_t*));
+
+    if (packetQueue == NULL) {
+        Serial.println("Failed to create packet queue!");
+
+        return;
+    }
+
+    xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
+                5, NULL);
 }
 
 WifiSniffer::~WifiSniffer() {
     esp_wifi_set_promiscuous(false);
     WiFi.softAPdisconnect(true);
     esp_wifi_set_promiscuous_rx_cb(NULL);
-
     pcap.closeFile();
-
     clean_sniffed_packets();
+
+    // Delete the packet processing task and queue
+    if (packetQueue) {
+        vQueueDelete(packetQueue);
+
+        packetQueue = NULL;
+    }
 }
 
 int WifiSniffer::get_sniffed_packets() { return sniffed_packet_count; };
