@@ -30,44 +30,42 @@
 int sniffed_packet_count = 0;
 static PCAP pcap = PCAP();
 static unsigned long int last_save = millis();
-static QueueHandle_t packetQueue =
-    xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
+static QueueHandle_t packetQueue;
 
 static void packet_processing_task(void* pv) {
-    WifiSniffer* sniffer = static_cast<WifiSniffer*>(pv);
     wifi_promiscuous_pkt_t* pkt;
 
     while (true) {
-        // Wait for a packet from the queue
         if (xQueueReceive(packetQueue, &pkt, portMAX_DELAY)) {
+            Serial.println("Processing packet...");
             wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
             uint32_t packetLength = ctrl.sig_len;
 
-            // Check for management packet bug
             if (packetLength > 2500) {
-                free(pkt); // Free the packet memory
+                Serial.println("Dropping oversized packet");
+                free(pkt);
 
                 continue;
             }
 
-            // Process the packet (write to PCAP or handle EAPOL)
             pcap.newPacketSD(ctrl.timestamp, ctrl.timestamp, packetLength,
                              pkt->payload);
             sniffed_packet_count++;
 
-            free(pkt); // Free the packet memory
+            Serial.printf("Processed packet #%d\n", sniffed_packet_count);
+            free(pkt);
         }
+
+        vTaskDelay(pdMS_TO_TICKS(1)); // Yield to other tasks
     }
 }
 
 static void cb(void* buf, wifi_promiscuous_pkt_type_t type) {
     if (type == WIFI_PKT_MISC)
-        return; // Ignore misc packets
+        return;
 
-    // Allocate memory for the packet and copy the data
     wifi_promiscuous_pkt_t* pkt =
         (wifi_promiscuous_pkt_t*)malloc(sizeof(wifi_promiscuous_pkt_t));
-
     if (!pkt) {
         Serial.println("Failed to allocate memory for packet");
 
@@ -76,12 +74,13 @@ static void cb(void* buf, wifi_promiscuous_pkt_type_t type) {
 
     memcpy(pkt, buf, sizeof(wifi_promiscuous_pkt_t));
 
-    // Send the packet to the queue
-    BaseType_t status = xQueueSendFromISR(packetQueue, &pkt, NULL);
+    BaseType_t status = xQueueSendToBackFromISR(packetQueue, &pkt, NULL);
 
     if (status != pdPASS) {
-        Serial.println("Failed to enqueue packet");
-        free(pkt); // Free memory if the queue is full
+        Serial.println("Queue full, dropping packet");
+        free(pkt);
+    } else {
+        Serial.println("Packet enqueued");
     }
 }
 
@@ -116,7 +115,7 @@ static void cb_bssid(void* buf, wifi_promiscuous_pkt_type_t type) {
 
     memcpy(pkt_copy, buf, sizeof(wifi_promiscuous_pkt_t));
 
-    BaseType_t status = xQueueSendFromISR(packetQueue, &pkt_copy, NULL);
+    BaseType_t status = xQueueSendToBackFromISR(packetQueue, &pkt_copy, NULL);
 
     if (status != pdPASS) {
         Serial.println("Failed to enqueue packet");
@@ -161,7 +160,7 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
 
     memcpy(pkt_copy, buf, sizeof(wifi_promiscuous_pkt_t));
 
-    BaseType_t status = xQueueSendFromISR(packetQueue, &pkt_copy, NULL);
+    BaseType_t status = xQueueSendToBackFromISR(packetQueue, &pkt_copy, NULL);
 
     if (status != pdPASS) {
         Serial.println("Failed to enqueue packet");
@@ -173,14 +172,19 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
     WiFi.mode(WIFI_MODE_STA);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(cb);
+    esp_wifi_set_promiscuous(true);
+    bool promiscuous;
+    esp_wifi_get_promiscuous(&promiscuous);
+    Serial.printf("Promiscuous mode: %s\n",
+                  promiscuous ? "Enabled" : "Disabled");
 
     pcap.filename = filename;
     pcap.openFile(SD);
 
     // Create a queue for packet processing
-    packetQueue = xQueueCreate(10, sizeof(wifi_promiscuous_pkt_t*));
+    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
 
-    if (packetQueue == NULL) {
+    if (!packetQueue) {
         Serial.println("Failed to create packet queue!");
 
         return;
@@ -196,11 +200,15 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(cb_bssid);
+    bool promiscuous;
+    esp_wifi_get_promiscuous(&promiscuous);
+    Serial.printf("Promiscuous mode: %s\n",
+                  promiscuous ? "Enabled" : "Disabled");
 
     pcap.filename = filename;
     pcap.openFile(SD);
 
-    packetQueue = xQueueCreate(10, sizeof(wifi_promiscuous_pkt_t*));
+    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
 
     if (packetQueue == NULL) {
         Serial.println("Failed to create packet queue!");
@@ -224,10 +232,15 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
     else
         esp_wifi_set_promiscuous_rx_cb(cb_handshake_capture);
 
+    bool promiscuous;
+    esp_wifi_get_promiscuous(&promiscuous);
+    Serial.printf("Promiscuous mode: %s\n",
+                  promiscuous ? "Enabled" : "Disabled");
+
     pcap.filename = filename;
     pcap.openFile(SD);
 
-    packetQueue = xQueueCreate(10, sizeof(wifi_promiscuous_pkt_t*));
+    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
 
     if (packetQueue == NULL) {
         Serial.println("Failed to create packet queue!");
