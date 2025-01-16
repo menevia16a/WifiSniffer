@@ -65,8 +65,15 @@ static void cb(void* buf, wifi_promiscuous_pkt_type_t type) {
     if (type == WIFI_PKT_MISC)
         return;
 
+    if (packetQueue == NULL) {
+        Serial.println("Queue is not initialized, dropping packet");
+
+        return;
+    }
+
     wifi_promiscuous_pkt_t* pkt =
         (wifi_promiscuous_pkt_t*)malloc(sizeof(wifi_promiscuous_pkt_t));
+
     if (!pkt) {
         Serial.println("Failed to allocate memory for packet");
 
@@ -170,6 +177,15 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD) {
+    // Create a queue for packet processing
+    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
+
+    if (!packetQueue) {
+        Serial.println("Failed to create packet queue!");
+
+        return;
+    }
+
     WiFi.mode(WIFI_MODE_AP);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(cb);
@@ -186,7 +202,11 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
 
     pcap.filename = filename;
     pcap.openFile(SD);
+    xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
+                5, NULL);
+}
 
+WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
     // Create a queue for packet processing
     packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
 
@@ -196,12 +216,6 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
         return;
     }
 
-    // Start the packet processing task
-    xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
-                5, NULL);
-}
-
-WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
     WiFi.mode(WIFI_MODE_AP);
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
     esp_wifi_set_promiscuous(true);
@@ -218,21 +232,21 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
 
     pcap.filename = filename;
     pcap.openFile(SD);
-
-    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
-
-    if (packetQueue == NULL) {
-        Serial.println("Failed to create packet queue!");
-
-        return;
-    }
-
     xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
                 5, NULL);
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
                          bool handshake_capture_mode) {
+    // Create a queue for packet processing
+    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
+
+    if (!packetQueue) {
+        Serial.println("Failed to create packet queue!");
+
+        return;
+    }
+
     WiFi.mode(WIFI_MODE_AP);
     memcpy(_bssid, bssid, sizeof(uint8_t) * 6);
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
@@ -254,15 +268,6 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
 
     pcap.filename = filename;
     pcap.openFile(SD);
-
-    packetQueue = xQueueCreate(100, sizeof(wifi_promiscuous_pkt_t*));
-
-    if (packetQueue == NULL) {
-        Serial.println("Failed to create packet queue!");
-
-        return;
-    }
-
     xTaskCreate(&packet_processing_task, "packet_processing_task", 4096, this,
                 5, NULL);
 }
