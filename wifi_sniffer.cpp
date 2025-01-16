@@ -180,8 +180,8 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
                   promiscuous ? "Enabled" : "Disabled");
 
     // Set custom mac for better stealth
-    uint8_t custom_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
-    esp_wifi_set_mac(WIFI_IF_AP, custom_mac);
+    set_random_mac();
+    esp_wifi_set_mac(WIFI_IF_AP, mac_address);
 
     pcap.filename = filename;
     pcap.openFile(SD);
@@ -212,8 +212,8 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
                   promiscuous ? "Enabled" : "Disabled");
 
     // Set custom mac for better stealth
-    uint8_t custom_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
-    esp_wifi_set_mac(WIFI_IF_AP, custom_mac);
+    set_random_mac();
+    esp_wifi_set_mac(WIFI_IF_AP, mac_address);
 
     pcap.filename = filename;
     pcap.openFile(SD);
@@ -248,8 +248,8 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
                   promiscuous ? "Enabled" : "Disabled");
 
     // Set custom mac for better stealth
-    uint8_t custom_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
-    esp_wifi_set_mac(WIFI_IF_AP, custom_mac);
+    set_random_mac();
+    esp_wifi_set_mac(WIFI_IF_AP, mac_address);
 
     pcap.filename = filename;
     pcap.openFile(SD);
@@ -284,3 +284,13 @@ WifiSniffer::~WifiSniffer() {
 int WifiSniffer::get_sniffed_packets() { return sniffed_packet_count; };
 
 void WifiSniffer::clean_sniffed_packets() { sniffed_packet_count = 0; };
+
+void WifiSniffer::set_random_mac() {
+    // First byte: clear bit 0 (not locally administered) and
+    // bit 1 (not multicast)
+    mac_address[0] = random(0, 255) & 0xFC;
+
+    // Randomize remaining 5 bytes
+    for (int i = 1; i < 6; i++)
+        mac_address[i] = random(0, 255);
+}

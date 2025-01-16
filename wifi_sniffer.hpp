@@ -23,6 +23,10 @@
 #include "esp_wifi.h"
 
 class WifiSniffer {
+  private:
+    uint8_t mac_address[6];
+    void set_random_mac();
+
   public:
     WifiSniffer(const char* filename, FS SD);
     WifiSniffer(const char* filename, FS SD, int ch);
