@@ -1,6 +1,7 @@
 /*
- * This file is part of the Capibara zero
- * project(https://capibarazero.github.io/). Copyright (c) 2023 Andrea Canale.
+ * This file is part of VoidCipher (enhanced capibaraZero)
+ * (https://github.com/menevia16a/VoidCipher). Copyright (c) 2024 Josiah
+ * Watkins.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,7 +31,7 @@
 int sniffed_packet_count = 0;
 static PCAP pcap = PCAP();
 static unsigned long int last_save = millis();
-static QueueHandle_t packetQueue;
+static QueueHandle_t packetQueue = NULL;
 
 static void packet_processing_task(void* pv) {
     wifi_promiscuous_pkt_t* pkt;
@@ -274,7 +275,7 @@ WifiSniffer::~WifiSniffer() {
     clean_sniffed_packets();
 
     // Delete the packet processing task and queue
-    if (packetQueue) {
+    if (packetQueue != NULL) {
         vQueueDelete(packetQueue);
 
         packetQueue = NULL;

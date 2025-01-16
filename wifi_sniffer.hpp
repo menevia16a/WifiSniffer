@@ -1,6 +1,7 @@
 /*
- * This file is part of the Capibara zero
- * project(https://capibarazero.github.io/). Copyright (c) 2023 Andrea Canale.
+ * This file is part of VoidCipher (enhanced capibaraZero)
+ * (https://github.com/menevia16a/VoidCipher). Copyright (c) 2024 Josiah
+ * Watkins.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,6 +26,7 @@
 class WifiSniffer {
   private:
     uint8_t mac_address[6];
+
     void set_random_mac();
 
   public:
