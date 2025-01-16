@@ -169,7 +169,7 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD) {
-    WiFi.mode(WIFI_MODE_AP);
+    WiFi.mode(WIFI_MODE_APSTA);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(cb);
     esp_wifi_set_promiscuous(true);
@@ -201,10 +201,10 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
-    WiFi.mode(WIFI_MODE_AP);
+    WiFi.mode(WIFI_MODE_APSTA);
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
     esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(cb_bssid);
+    esp_wifi_set_promiscuous_rx_cb(cb);
 
     bool promiscuous;
     esp_wifi_get_promiscuous(&promiscuous);
@@ -232,7 +232,7 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
                          bool handshake_capture_mode) {
-    WiFi.mode(WIFI_MODE_AP);
+    WiFi.mode(WIFI_MODE_APSTA);
     memcpy(_bssid, bssid, sizeof(uint8_t) * 6);
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
     esp_wifi_set_promiscuous(true);
