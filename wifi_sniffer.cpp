@@ -169,14 +169,19 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD) {
-    WiFi.mode(WIFI_MODE_STA);
+    WiFi.mode(WIFI_MODE_APSTA);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(cb);
     esp_wifi_set_promiscuous(true);
+
     bool promiscuous;
     esp_wifi_get_promiscuous(&promiscuous);
     Serial.printf("Promiscuous mode: %s\n",
                   promiscuous ? "Enabled" : "Disabled");
+
+    // Set custom mac for better stealth
+    uint8_t custom_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
+    esp_wifi_set_mac(WIFI_IF_AP, custom_mac);
 
     pcap.filename = filename;
     pcap.openFile(SD);
@@ -196,14 +201,19 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD) {
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
-    WiFi.mode(WIFI_MODE_STA);
+    WiFi.mode(WIFI_MODE_APSTA);
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(cb_bssid);
+
     bool promiscuous;
     esp_wifi_get_promiscuous(&promiscuous);
     Serial.printf("Promiscuous mode: %s\n",
                   promiscuous ? "Enabled" : "Disabled");
+
+    // Set custom mac for better stealth
+    uint8_t custom_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
+    esp_wifi_set_mac(WIFI_IF_AP, custom_mac);
 
     pcap.filename = filename;
     pcap.openFile(SD);
@@ -222,7 +232,7 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, int ch) {
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
                          bool handshake_capture_mode) {
-    WiFi.mode(WIFI_MODE_STA);
+    WiFi.mode(WIFI_MODE_APSTA);
     memcpy(_bssid, bssid, sizeof(uint8_t) * 6);
     esp_wifi_set_channel(ch, (wifi_second_chan_t)NULL);
     esp_wifi_set_promiscuous(true);
@@ -236,6 +246,10 @@ WifiSniffer::WifiSniffer(const char* filename, FS SD, uint8_t* bssid, int ch,
     esp_wifi_get_promiscuous(&promiscuous);
     Serial.printf("Promiscuous mode: %s\n",
                   promiscuous ? "Enabled" : "Disabled");
+
+    // Set custom mac for better stealth
+    uint8_t custom_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
+    esp_wifi_set_mac(WIFI_IF_AP, custom_mac);
 
     pcap.filename = filename;
     pcap.openFile(SD);
