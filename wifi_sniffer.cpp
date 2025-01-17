@@ -135,29 +135,40 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
     wifi_promiscuous_pkt_t* pkt = static_cast<wifi_promiscuous_pkt_t*>(buf);
     wifi_pkt_rx_ctrl_t ctrl = pkt->rx_ctrl;
 
-    Serial.printf("Packet detected: Type: %d, Length: %d\n", type,
+    // Ignore non-management or non-data packets
+    if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA)
+        return;
+
+    // Ignore packets that are too short or too long
+    if (ctrl.sig_len < 26 || ctrl.sig_len > 2500)
+        return;
+
+    const char* type_str;
+
+    switch (type) {
+    case WIFI_PKT_MGMT:
+        type_str = "Management";
+        break;
+    case WIFI_PKT_DATA:
+        type_str = "Data";
+        break;
+    default:
+        type_str = "Unknown";
+    }
+
+    Serial.printf("Packet detected: Type: %s, Length: %d\n", type_str,
                   ctrl.sig_len);
     Serial.printf("Source MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
                   pkt->payload[10], pkt->payload[11], pkt->payload[12],
                   pkt->payload[13], pkt->payload[14], pkt->payload[15]);
 
-    // Ignore non-management or non-data packets
-    if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA)
+    // BSSID filtering (addr3 should match target BSSID)
+    if (memcmp(&pkt->payload[10], _bssid, 6) != 0) // Check addr3
         return;
 
-    // Ignore packets that are too long
-    if (ctrl.sig_len > 2500)
-        return;
-
-    // BSSID filtering
-    if (memcmp(&pkt->payload[4], _bssid, 6) != 0 &&
-        memcmp(&pkt->payload[10], _bssid, 6) != 0 &&
-        memcmp(&pkt->payload[18], _bssid, 6) != 0)
-        return;
-
-    // Check for EAPOL frames (0x888E)
-    if (ctrl.sig_len >= 2 && pkt->payload[0] == 0x88 &&
-        pkt->payload[1] == 0x8E) {
+    // Check for EAPOL frames (0x888E at payload offset 24+)
+    if (ctrl.sig_len >= 26 && pkt->payload[24] == 0x88 &&
+        pkt->payload[25] == 0x8E) {
         Serial.println("EAPOL frame detected!");
 
         // Save EAPOL packet to file or memory
@@ -167,6 +178,7 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
         pcap.newPacketSD(timestamp, microseconds, ctrl.sig_len, pkt->payload);
         sniffed_packet_count++;
 
+        // Flush PCAP file every 2 seconds
         if (millis() - last_save >= 2000) {
             pcap.flushFile();
             last_save = millis();
