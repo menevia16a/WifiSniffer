@@ -132,47 +132,45 @@ static void cb_bssid(void* buf, wifi_promiscuous_pkt_type_t type) {
 }
 
 static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
-    if (type == WIFI_PKT_MISC)
-        return; // Ignore misc packets
+    wifi_promiscuous_pkt_t* pkt = static_cast<wifi_promiscuous_pkt_t*>(buf);
+    wifi_pkt_rx_ctrl_t ctrl = pkt->rx_ctrl;
 
-    wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
-    wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
+    Serial.printf("Packet detected: Type: %d, Length: %d\n", type,
+                  ctrl.sig_len);
+    Serial.printf("Source MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  pkt->payload[10], pkt->payload[11], pkt->payload[12],
+                  pkt->payload[13], pkt->payload[14], pkt->payload[15]);
 
-    // Packet too long
-    if (ctrl.sig_len > 2500)
-        return;
-
-    // Only handle management or data packets
+    // Ignore non-management or non-data packets
     if (type != WIFI_PKT_MGMT && type != WIFI_PKT_DATA)
         return;
 
-    // EAPOL frames start with 0x88 0x8E in the frame payload
-    if (pkt->payload[0] != 0x88 || pkt->payload[1] != 0x8E)
+    // Ignore packets that are too long
+    if (ctrl.sig_len > 2500)
         return;
 
-    // Compare addr1, addr2, and addr3 with the saved BSSID
+    // BSSID filtering
     if (memcmp(&pkt->payload[4], _bssid, 6) != 0 &&
         memcmp(&pkt->payload[10], _bssid, 6) != 0 &&
         memcmp(&pkt->payload[18], _bssid, 6) != 0)
         return;
 
-    // Allocate memory for the packet and enqueue it
-    wifi_promiscuous_pkt_t* pkt_copy =
-        (wifi_promiscuous_pkt_t*)malloc(sizeof(wifi_promiscuous_pkt_t));
+    // Check for EAPOL frames (0x888E)
+    if (ctrl.sig_len >= 2 && pkt->payload[0] == 0x88 &&
+        pkt->payload[1] == 0x8E) {
+        Serial.println("EAPOL frame detected!");
 
-    if (!pkt_copy) {
-        Serial.println("Failed to allocate memory for packet");
+        // Save EAPOL packet to file or memory
+        uint32_t timestamp = now();
+        uint32_t microseconds = (unsigned int)(micros() - millis() * 1000);
 
-        return;
-    }
+        pcap.newPacketSD(timestamp, microseconds, ctrl.sig_len, pkt->payload);
+        sniffed_packet_count++;
 
-    memcpy(pkt_copy, buf, sizeof(wifi_promiscuous_pkt_t));
-
-    BaseType_t status = xQueueSendToBackFromISR(packetQueue, &pkt_copy, NULL);
-
-    if (status != pdPASS) {
-        Serial.println("Failed to enqueue packet");
-        free(pkt_copy); // Free memory if the queue is full
+        if (millis() - last_save >= 2000) {
+            pcap.flushFile();
+            last_save = millis();
+        }
     }
 }
 
