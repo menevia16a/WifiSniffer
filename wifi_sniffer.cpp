@@ -143,6 +143,10 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
     if (ctrl.sig_len < 26 || ctrl.sig_len > 2500)
         return;
 
+    // BSSID filtering (addr3 should match target BSSID)
+    if (memcmp(&pkt->payload[10], _bssid, 6) != 0) // Check addr3
+        return;
+
     const char* type_str;
 
     switch (type) {
@@ -162,10 +166,6 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
                   pkt->payload[10], pkt->payload[11], pkt->payload[12],
                   pkt->payload[13], pkt->payload[14], pkt->payload[15]);
 
-    // BSSID filtering (addr3 should match target BSSID)
-    if (memcmp(&pkt->payload[10], _bssid, 6) != 0) // Check addr3
-        return;
-
     // Check for EAPOL frames (0x888E at payload offset 24+)
     if (ctrl.sig_len >= 26 && pkt->payload[24] == 0x88 &&
         pkt->payload[25] == 0x8E) {
@@ -183,7 +183,8 @@ static void cb_handshake_capture(void* buf, wifi_promiscuous_pkt_type_t type) {
             pcap.flushFile();
             last_save = millis();
         }
-    }
+    } else
+        Serial.println("Non-EAPOL frame detected");
 }
 
 WifiSniffer::WifiSniffer(const char* filename, FS SD) {
